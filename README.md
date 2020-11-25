@@ -75,7 +75,7 @@ help(get_table)
 
 prints
 
-```bash
+```
 Help on function get_table in module utils:
 
 get_table(filepath=None)
@@ -83,5 +83,4 @@ get_table(filepath=None)
     
     This function assumes that code is in a directory which has the same parent directory as the LecturePatternRecognion
     repository. If this is not the case, please supply a string with the correct file path to the filepath argument.
-
 ```
