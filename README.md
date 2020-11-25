@@ -22,3 +22,4 @@ The code assumes that this repository is placed into the same folder as the *Lec
         └── utils.py
 ```
 
+Please create your own branches from the main repository branch and work in those, we can discuss all necessary merges together in meetings.
