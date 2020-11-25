@@ -5,7 +5,7 @@ The code assumes that this repository is placed into the same folder as the *Lec
 
 ```bash
 .
-└── Some Parent Directory
+└── SomeParentDirectory
     ├── LecturePatternRecognition
     │   ├── README.md
     │   ├── project01
