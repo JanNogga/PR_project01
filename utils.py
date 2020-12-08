@@ -23,7 +23,7 @@ def hash_states(state_batch):
 
     This function assumes that the batch of states is a numpy array shaped (num_states, dim_state).
     The output is a numpy array shaped (num_states, ) containing integer labels in the range between
-    0 and num_unique_states.
+    0 and num_unique_states-1.
     """
 
     #sort the input array
