@@ -26,14 +26,12 @@ def hash_states(state_batch):
     0 and num_unique_states.
     """
 
-    #convert state batch to 1d array with decimal state representation
-    arr = state_batch
-    #sort the 1d array
-    sorted_idx = np.lexsort(arr.T)
-    sorted_arr = arr[sorted_idx]
+    #sort the input array
+    sorted_idx = np.lexsort(state_batch.T)
+    sorted_arr = state_batch[sorted_idx]
     #calculate the difference from element i to element i+1 for all i
     diffs = np.diff(sorted_arr, axis=0)
-    #mark where the entries in the sorted array have changed
+    #mark where any entries in the sorted array have changed
     diff_flags = np.append([False], np.any(diffs != 0, axis=-1))
     #use this to get unique labels at each entry
     labels = diff_flags.cumsum()
