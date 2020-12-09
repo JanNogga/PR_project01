@@ -162,7 +162,7 @@ if __name__ == '__main__':
 
     T_sanity_check = count_transitions(char_list)
     P_sanity_check = normalize_transition_matrix(T_sanity_check)
-    print(T_norm)
+    print(T_sanity_check)
     
     
 
