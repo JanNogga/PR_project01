@@ -56,6 +56,31 @@ def lookup_states(query, labels, state_batch):
     i = np.searchsorted(labels[ind_sorted], query)
     return state_batch[ind_sorted[i]].reshape((-1, state_batch.shape[-1]))
 
+def one_hot_encode(labels, num_states=None):
+    """Converts a batch of labels to a batch of one-hot encoded vectors, zero everywhere but at the index of
+    the label.
+    
+    The input is expected to be a numpy array shaped (num_labels, ), the output is a numpy array with the shape
+    (num_unique_states, num_labels). The number of states to one-hot encode can be inferred from the labels or passed
+    manually. Note that in contrast to other functions, the output here is transposed, meaning that the encoding
+    of label i is in column i of the output. This facilitates later matrix multiplication.
+    """
+    
+    if num_states is not None:
+        assert num_states > labels.max(), 'The number of states must be larger than the maximum state label!'
+    shape = labels.max() + 1 if num_states is None else num_states
+    return np.eye(shape)[labels].T
+
+def one_hot_decode(encoding):
+    """Converts a batch of one-hot encoded vectors to a batch of labels, corresponding to the unique non-zero index
+    of each vector.
+    
+    The input is expected to be a numpy array shaped (num_unique_states, num_labels), the output is a numpy array
+    with the shape (num_labels, ). This function is exactly inverse to one_hot_encode().
+    """
+    
+    return (encoding.T @ np.arange(encoding.shape[0])).astype(int)
+
 def count_transitions(sequence, num_states=None):
     """Given a sequence of suitable integer labels, returns a matrix T[i,j] counting the number of transitions
     from label i to label j.
