@@ -55,6 +55,24 @@ def lookup_states(query, labels, state_batch):
     ind_sorted = labels.argsort()
     i = np.searchsorted(labels[ind_sorted], query)
     return state_batch[ind_sorted[i]].reshape((-1, state_batch.shape[-1]))
+
+def count_transitions(sequence, num_states=None):
+    """Given a sequence of suitable integer labels, returns a matrix T[i,j] counting the number of transitions
+    from label i to label j.
+
+    This function assumes that  sequence is a numpy array shaped (num_states, ). By default, the output shape
+    is a numpy array shaped (num_unique_states, num_unique_states). This number is inferred from labels in the
+    sequence.
+    If you want to aggregate counts from different (groups of) sequences, where an individual sequence does not
+    necessarily contain each state, pass the number of unique states manually to num_states. You can then sum the
+    outputs of this function for each sequence passed.
+    """
+    
+    if num_states is not None:
+        assert num_states > sequence.max(), 'The number of states must be larger than the maximum state label!'
+    shape = sequence.max() + 1 if num_states is None else num_states
+    dims = (shape, shape)
+    return np.bincount(np.ravel_multi_index((sequence[:-1], sequence[1:]), dims), minlength=shape**2).reshape(dims).astype(float)
     
     
     
