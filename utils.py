@@ -109,7 +109,7 @@ if __name__ == '__main__':
     T = count_transitions(out_labels)
     # How many times has the state with the label 245 transitioned to the state with the label 246?
     print(T[245, 246])
-    # How many times has the state with the label 246 transitioned to itself?
+    # How many times has the state with the label 245 transitioned to itself?
     print(T[245, 245])
     # How many times has the state with the label 246 transitioned to the state with the label 245?
     print(T[246, 245])
