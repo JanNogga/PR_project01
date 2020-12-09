@@ -60,7 +60,7 @@ def count_transitions(sequence, num_states=None):
     """Given a sequence of suitable integer labels, returns a matrix T[i,j] counting the number of transitions
     from label i to label j.
 
-    This function assumes that  sequence is a numpy array shaped (num_states, ). By default, the output shape
+    This function assumes that  sequence is a numpy array shaped (length_sequence, ). By default, the output shape
     is a numpy array shaped (num_unique_states, num_unique_states). This number is inferred from labels in the
     sequence.
     If you want to aggregate counts from different (groups of) sequences, where an individual sequence does not
@@ -109,7 +109,7 @@ if __name__ == '__main__':
     T = count_transitions(out_labels)
     # How many times has the state with the label 245 transitioned to the state with the label 246?
     print(T[245, 246])
-    # How many times has the state with the label 245 transitioned to itself?
+    # How many times has the state with the label 246 transitioned to itself?
     print(T[245, 245])
     # How many times has the state with the label 246 transitioned to the state with the label 245?
     print(T[246, 245])
