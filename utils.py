@@ -23,7 +23,7 @@ def hash_states(state_batch):
 
     This function assumes that the batch of states is a numpy array shaped (num_states, dim_state).
     The output is a numpy array shaped (num_states, ) containing integer labels in the range between
-    0 and num_unique_states-1.
+    0 and num_unique_states-1. Be sure to pass all relevant states at once.
     """
 
     #sort the input array
@@ -40,6 +40,24 @@ def hash_states(state_batch):
     pos_labels[sorted_idx] = labels
     return pos_labels
 
+def lookup_states(query, labels, state_batch):
+    """Converts a sequence of labels to the corresponding states, given a full sequence of labels and
+    the corresponding batch of states.
+
+    This function assumes that  query is a sequence of integer labels shaped (length_query, ), the labels
+    are a sequence of integer labels shaped (num_states, ) and the batch of states is a numpy array shaped
+    (num_states, dim_state).
+    The output is a numpy array shaped (length_query, dim_state) containing the states corresponding to the
+    query labels. If state_batch and labels are input and output to hash_states(), this function implements
+    the inverse hash function for each element of the query.
+    """
+    
+    ind_sorted = labels.argsort()
+    i = np.searchsorted(labels[ind_sorted], query)
+    return state_batch[ind_sorted[i]].reshape((-1, state_batch.shape[-1]))
+    
+    
+    
 if __name__ == '__main__':
     dataset_df = get_table()
     display(dataset_df)
@@ -56,11 +74,18 @@ if __name__ == '__main__':
     # battery usage for each activity vector
     battery_usage = dataset_df['battery_level'].to_list()
     print(battery_usage)
-    
+
     # convert to a sequence of labels, note that nan was dropped above
     out_labels = hash_states(activity_vectors)
     print(activity_vectors[:10])
     print(out_labels[:10])
+
+    # given some labels, what states do they represent???
+    #labels for which we want to know the states
+    query = np.array([93, 160, 92]) 
+    #states represented by those labels, in the same order as query
+    answer = lookup_states(query, out_labels, activity_vectors)
+    print(answer.shape)
     
     
 
