@@ -105,6 +105,15 @@ if __name__ == '__main__':
     answer = lookup_states(query, out_labels, activity_vectors)
     print(answer.shape)
     
+    # Count how many times each label has transitioned to each other label
+    T = count_transitions(out_labels)
+    # How many times has the state with the label 245 transitioned to the state with the label 246?
+    print(T[245, 246])
+    # How many times has the state with the label 246 transitioned to itself?
+    print(T[245, 245])
+    # How many times has the state with the label 246 transitioned to the state with the label 245?
+    print(T[246, 245])
+    
     
 
 
