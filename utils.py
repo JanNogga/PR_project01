@@ -97,7 +97,16 @@ def count_transitions(sequence, num_states=None):
         assert num_states > sequence.max(), 'The number of states must be larger than the maximum state label!'
     shape = sequence.max() + 1 if num_states is None else num_states
     dims = (shape, shape)
-    return np.bincount(np.ravel_multi_index((sequence[:-1], sequence[1:]), dims), minlength=shape**2).reshape(dims).astype(float)
+    flattened_index = np.ravel_multi_index((sequence[:-1], sequence[1:]), dims)
+    return np.bincount(flattened_index, minlength=shape**2).reshape(dims).astype(float)
+
+def normalize_transition_matrix(transition_matrix):
+    """Normalizes a given transition matrix such that each row sums up to one.
+    
+    The given transition matrix is assumed to be stored in a numpy array.
+    """
+    
+    return transition_matrix / np.maximum(transition_matrix.sum(-1, keepdims=True), 1)
     
     
     
@@ -134,7 +143,7 @@ if __name__ == '__main__':
     T = count_transitions(out_labels)
     # How many times has the state with the label 245 transitioned to the state with the label 246?
     print(T[245, 246])
-    # How many times has the state with the label 246 transitioned to itself?
+    # How many times has the state with the label 245 transitioned to itself?
     print(T[245, 245])
     # How many times has the state with the label 246 transitioned to the state with the label 245?
     print(T[246, 245])
