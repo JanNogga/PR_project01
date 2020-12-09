@@ -148,7 +148,7 @@ if __name__ == '__main__':
     # How many times has the state with the label 245 transitioned to the state with the label 246?
     print(T[246, 245])
     
-    # sanity check T against the example in lecture 10 on slide 13
+    # sanity check P against the example in lecture 10 on slide 13
     # unfortunately, the example is wrong in the lecture, as a manual recount shows...
     lines = open('lecture_example.txt','r')
     char_list = []
@@ -162,7 +162,7 @@ if __name__ == '__main__':
 
     T_sanity_check = count_transitions(char_list)
     P_sanity_check = normalize_transition_matrix(T_sanity_check)
-    print(T_sanity_check)
+    print(P_sanity_check)
     
     
 
