@@ -82,15 +82,15 @@ def one_hot_decode(encoding):
     return (encoding.T @ np.arange(encoding.shape[0])).astype(int)
 
 def count_transitions(sequence, num_states=None):
-    """Given a sequence of suitable integer labels, returns a matrix T[i,j] counting the number of transitions
-    from label i to label j.
+    """Given a sequence of suitable integer labels, returns a matrix T[i,j] counting the number of observed
+    transitions from label j to label i.
 
     This function assumes that  sequence is a numpy array shaped (length_sequence, ). By default, the output shape
     is a numpy array shaped (num_unique_states, num_unique_states). This number is inferred from labels in the
     sequence.
     If you want to aggregate counts from different (groups of) sequences, where an individual sequence does not
     necessarily contain each state, pass the number of unique states manually to num_states. You can then sum the
-    outputs of this function for each sequence passed.
+    outputs of this function for each sequence passed. The indexing is specified in lecture 10, on slide 8.
     """
     
     if num_states is not None:
@@ -98,15 +98,15 @@ def count_transitions(sequence, num_states=None):
     shape = sequence.max() + 1 if num_states is None else num_states
     dims = (shape, shape)
     flattened_index = np.ravel_multi_index((sequence[:-1], sequence[1:]), dims)
-    return np.bincount(flattened_index, minlength=shape**2).reshape(dims).astype(float)
+    return np.bincount(flattened_index, minlength=shape**2).reshape(dims).astype(float).T
 
 def normalize_transition_matrix(transition_matrix):
-    """Normalizes a given transition matrix such that each row sums up to one.
+    """Normalizes a given transition matrix such that each column sums up to one.
     
     The given transition matrix is assumed to be stored in a numpy array.
     """
     
-    return transition_matrix / np.maximum(transition_matrix.sum(-1, keepdims=True), 1)
+    return transition_matrix / np.maximum(transition_matrix.sum(0, keepdims=True), 1)
     
     
     
@@ -141,11 +141,11 @@ if __name__ == '__main__':
     
     # Count how many times each label has transitioned to each other label
     T = count_transitions(out_labels)
-    # How many times has the state with the label 245 transitioned to the state with the label 246?
+    # How many times has the state with the label 246 transitioned to the state with the label 245?
     print(T[245, 246])
     # How many times has the state with the label 245 transitioned to itself?
     print(T[245, 245])
-    # How many times has the state with the label 246 transitioned to the state with the label 245?
+    # How many times has the state with the label 245 transitioned to the state with the label 246?
     print(T[246, 245])
     
     
