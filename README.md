@@ -1,6 +1,8 @@
 # PR_project01
 Solutions to the Pattern Recognition lecture first group project.
 
+[![forthebadge](https://forthebadge.com/images/badges/built-with-resentment.svg)](https://forthebadge.com)
+
 The code assumes that this repository is placed into the same folder as the *LecturePatternRecognition* repository. For example, your folder structure could look like this:
 
 ```bash
