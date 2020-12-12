@@ -107,6 +107,34 @@ def normalize_transition_matrix(transition_matrix):
     """
     
     return transition_matrix / np.maximum(transition_matrix.sum(0, keepdims=True), 1)
+
+
+def state_dist_to_activity_dist(state_dist, labels, state_batch):
+    """Given a full set of labels and the corresponding batch of states, converts distributions over the one-hot
+    encoded state space to dim_state individual distributions over the activations in corresponding state components.
+
+    This function assumes that state_dist is numpy array shaped (num_unique_states, num_dists). It should contain a batch
+    of distributions over the state space in each column. The labels are a sequence of integer labels shaped (num_states, )
+    and the batch of states is a numpy array shaped (num_states, dim_state).
+    The output is then a batch of distributions over the state vector components shaped (num_dists, dim_state). Each
+    row contains the result of one converted distribution, and each column the probability of a specific package 
+    (or battery_charge state) being active.
+    """
+    
+    helper_states = lookup_states(np.arange(0, state_dist.shape[0]), labels, state_batch)
+    return state_dist.T @ helper_states
+    
+
+def BCE(prediction_dist, target):
+    """Returns the binary cross-entropy loss between a set of probability distributions over the activity vector
+    components and the target activity vectors.
+    
+    This function expects both the input prediction_dist and target to be numpy arrays shaped (num_predictions, dim_state).
+    The output is a numpy array shaped (num_predictions, ).
+    """
+    
+    loss = target*np.log(np.maximum(prediction_dist, 1e-15)) + (1-target)*np.log(np.maximum(1-prediction_dist, 1e-15))
+    return -loss.mean(axis=-1)
     
     
     
@@ -163,6 +191,29 @@ if __name__ == '__main__':
     T_sanity_check = count_transitions(char_list)
     P_sanity_check = normalize_transition_matrix(T_sanity_check)
     print(P_sanity_check)
+    
+    # very simple prediction and loss calculation example (not partioned into train/valid/test sets!)
+    # battery still needs adjustment, contains strange values != 0 or 1, so it isn't included here
+    activity_vectors_df = dataset_df[running_packages] 
+    activity_vectors = activity_vectors_df.dropna().to_numpy()
+    out_labels = hash_states(activity_vectors)
+    # number of prediction steps into the future
+    N_steps = 1 
+    one_hot_prediction_input = one_hot_encode(out_labels[:-N_steps], num_states = out_labels.max() + 1)
+    T = count_transitions(out_labels)
+    P = normalize_transition_matrix(T)
+    pred = np.power(P, N_steps)
+    # calculate a distribution over future states
+    estimate = pred @ one_hot_prediction_input 
+    # convert to sets of individual distributions over activity components
+    estimate_activity_dist = state_dist_to_activity_dist(estimate, out_labels, activity_vectors)
+    # simple targets - just time-shifted the input by N_steps
+    targets = lookup_states(out_labels[N_steps:], out_labels, activity_vectors)
+    # calculate loss
+    loss = BCE(estimate_activity_dist, targets)
+    # print reduced loss
+    print('Prediction loss over the whole dataset for', N_steps, 'time-steps:', loss.mean())
+    
     
     
 
