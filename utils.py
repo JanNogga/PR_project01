@@ -214,7 +214,22 @@ if __name__ == '__main__':
     # print reduced loss
     print('Prediction loss over the whole dataset for', N_steps, 'time-steps:', loss.mean())
     
+    # a very basic attempt at regression - note that the state space seems 'redundant'
+    print('Number of running packages:', len(running_packages))
+    activity_vectors_df = dataset_df[running_packages[:49]+running_packages[50:54]+running_packages[55:]]
+    print('...after removing some:', len(running_packages[:49]+running_packages[50:54]+running_packages[55:]))
+    activity_vectors_df = activity_vectors_df[dataset_df['battery_level'] <= 0.]
+    activity_vectors_df = activity_vectors_df.T.drop_duplicates().T
+    activity_vectors = activity_vectors_df.dropna().to_numpy()
+    x = activity_vectors
+    print('Final data shape:', x.shape)
+    X = np.concatenate([np.ones((x.shape[0],1)), x], axis=-1).T
+    print('X shape:', X.shape)
+    print('X.T shape:', X.T.shape)
+    y = dataset_df['battery_level'].dropna().to_numpy()
+    y = y[y <= 0.]
+    print('Targets shape:', y.shape)
+    print('Hat matrix shape:', (X @ X.T).shape)
+    w = np.linalg.inv(X @ X.T) @ X @ y
+    print('Weights Shape:', w.shape)
     
-    
-
-
