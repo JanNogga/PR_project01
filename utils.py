@@ -159,6 +159,29 @@ def mul_sum(args):
     """
     A, b = args
     return (A * b[:, None, None]).sum(axis=0)
+
+def PCA(data, correlation = False, sort = True):
+
+    mean = np.mean(data, axis=0)
+
+    data_adjust = data - mean
+    
+    if correlation:
+
+        matrix = np.corrcoef(data_adjust.T)
+
+    else:
+        matrix = np.cov(data_adjust.T) 
+
+    eigenvalues, eigenvectors = np.linalg.eig(matrix)
+
+    if sort:
+    #: sort eigenvalues and eigenvectors
+        sort = eigenvalues.argsort()[::-1]
+        eigenvalues = eigenvalues[sort]
+        eigenvectors = eigenvectors[:,sort]
+
+    return eigenvalues, eigenvectors
     
     
     
