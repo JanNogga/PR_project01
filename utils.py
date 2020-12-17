@@ -2,10 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 from IPython.display import display
-# mpmath is included in sympy, which Sebastian recommended we install
-import mpmath as mp
-# necessary if we want to speed up the MAP prediction
-from multiprocessing import Pool, cpu_count
+import time
 
 
 def get_table(filepath = None):
@@ -145,20 +142,57 @@ def BCE(prediction_dist, target):
     loss = target*np.log(np.maximum(prediction_dist, 1e-15)) + (1-target)*np.log(np.maximum(1-prediction_dist, 1e-15))
     return -loss.mean(axis=-1)
 
-def exp(arg):
-    """Calculate the element-wise exp of an array of mpmath mpf values.
+def estim_mle(transition_counts):
+    """Returns the MLE estimator transition matrix for a Markov chain. 
 
-    Just a helper function to allow distribution of costly operations to multiple processes in the MAP prediction.
+    The input is assumed to be a numpy array (n_i,j) counting transitions from state j to state i, shaped
+    (num_unique_states, num_unique_states). The output has the same shape, and contains the estimated
+    prediction probabilities from state j to state i.
     """
-    return np.vectorize(mp.exp)(arg)
+    
+    return normalize_transition_matrix(transition_counts)
 
-def mul_sum(args):
-    """Calculate a weighted sum of matrices containing mpmath mpf values.
+def estim_map(transition_counts, num_samples=500, limit=100, d_type=np.float32, eps=1e-25):
+    """Returns the MAP estimator transition matrix for a Markov chain. 
 
-    Just another helper function to allow distribution of costly operations to multiple processes in the MAP prediction.
+    The input is assumed to be a numpy array (n_i,j) counting transitions from state j to state i, shaped
+    (num_unique_states, num_unique_states). The output has the same shape, and contains the estimated
+    prediction probabilities from state j to state i. You can also set the number of samples for the approximation
+    of the result, as well as the upper limit for the sampled matrix values. Operations are safely possible in
+    float32 representation. The amount of memory allocated in RAM by this function is about 5GB per 1k samples.
     """
-    A, b = args
-    return (A * b[:, None, None]).sum(axis=0)
+    
+    num_states = transition_counts.shape[-1]
+    samples = np.random.randint(limit, size=(num_samples, num_states, num_states), dtype=np.int16).astype(d_type)
+    samples = normalize_transition_matrix(samples)
+    tmp = transition_counts.astype(d_type) * np.log(np.maximum(samples, eps))
+    tmp = tmp.sum(axis=(-1,-2))
+    tmp -= tmp.max()
+    tmp = np.exp(tmp)
+    samples =  samples * tmp[:, None, None] 
+    S_res = samples.sum(axis=0)
+    eta = tmp.sum()
+    return (1/eta * S_res).astype(np.float64)
+
+def fit_predictor(list_of_seqs, num_unique_states, mode, num_samples=500, limit=100, d_type=np.float32, eps=1e-25):
+    """Returns MLE or MAP predictors fitted to a given list of sequences describing state transitions.
+    
+    Please provide the number of unique states yourself, and pass even a single sequence as a one-element list. The 
+    observed state transition counts are aggregated over all sequences, and then used to get the best fit transition
+    matrix. Also note the arguments which might be passed down to different prediction modes, but are irrelevant to
+    others.
+    """
+    
+    N = np.zeros((num_unique_states, num_unique_states))
+    for seq in list_of_seqs:
+        N += count_transitions(seq, num_states=num_unique_states)
+        
+    if mode == 'MLE':
+        return estim_mle(N)
+    elif mode == 'MAP':
+        return estim_map(N, num_samples=num_samples, limit=limit, d_type=d_type, eps=eps)
+    else:
+        raise NotImplementedError("Unknown predictor mode!")
 
 def PCA(data, correlation = False, sort = True):
 
@@ -280,8 +314,8 @@ if __name__ == '__main__':
     w = np.linalg.inv(X @ X.T) @ X @ y
     print('Weights Shape:', w.shape)
     
-    # a minimal example of the MAP prediction process
-    # the calculations are borrowed from the ipynb example uploaded by Sebastian to ecampus, and executed in 'logspace'
+    # a minimal example of the MLE/MAP transition matrix estimation process
+    # the calculations for MAP are borrowed from the ipynb example uploaded by Sebastian to ecampus, and executed in 'logspace'
     # fix random number generator so our results are the same
     np.random.seed(123)
     # first, we define some ground truth transition matrix for a dummy Markov Chain
@@ -295,115 +329,13 @@ if __name__ == '__main__':
         traj.append(np.random.choice([0, 1, 2, 3], p=gt[:,traj[-1]]).astype(int))
     traj = np.array(traj).astype(int)
 
-    # uniformly sample num_samples transition matrices, with maximum transition entries limit
-    # this is how we include our 'prior'
-    limit = 100
-    num_samples = 100000
-    # set the dimensionality of our state space - 4 in the dummy example
-    num_states = 4
-    S = np.random.randint(limit, size=(num_samples, num_states, num_states))
-    print('sample shape:', S.shape)
-    # normalize to obtain transition matrices from the sampled transition counts
-    S = normalize_transition_matrix(S)
-    # get MLE for comparison later
-    T_data = count_transitions(traj)
-    S_from_T = normalize_transition_matrix(T_data)
-    print('T_data shape:', T_data.shape)
-
-
-    #set mpmath precision
-    mp.dps = 25
-    #set min input to np.log
-    eps = 1e-25
-    #start measurement of time
     start = time.time()
-    # calculate the MAP prediction term - relevant calculation have been moved to 'logspace'
-    # this allows us to rely on pure numpy for a longer section of the code
-    tmp_log = T_data * np.log(np.maximum(S, eps))
-    print('tmp_log shape:', tmp_log.shape)
-    tmp_log = tmp_log.sum(axis=(-1,-2))
-    print('tmp_log shape after sum:', tmp_log.shape)
-    # Now we have some vector of negative numbers with very large absolute values
-    # If we call numpy exp, even float128bit precision will be insufficient to represent the result
-    # The result would be rounded to zero, and we would lose all information
-    # This problem is more severe the larger the transition matrices are
-    exp_from_mp = np.vectorize(mp.exp)
-    # hackily 'typecast' the contents of the log vector to mpmath floats
-    # apply exp over the whole array, this is very slow, basically like 3 nested for-loops
-    tmp_exp = exp_from_mp(tmp_log.astype(object) * mp.mpf('1'))
-    print('tmp_exp shape:', tmp_exp.shape)
-    S_weighted =  S * tmp_exp[:, None, None] 
-    print('S_weighted shape:', S_weighted.shape)
-    S_expectation = S_weighted.sum(axis=0)
-    print('S_expectation shape:', S_expectation.shape)
-    eta = tmp_exp.sum()
-    print('eta:', eta)
-    # normalize the result, here we divide an array of tiny values by a very small normalization factor eta
-    # now our values are large enough again to be represented appropriately by float64
-    S_res = (1/eta * S_expectation).astype(np.float64)
-    print('Result dtype:', S_res.dtype)
-    # Save the result of this code block for comparison with the next one
-    np.save('prev.npy', S_res)
-    print(S_res.shape)
-    # Print runtime, ground truth transition matrix for the simulator, MAP estimate, and MLE estimate
+    # here we have simply split the sequence traj into traj[:15], traj[15:] to emphasize that the input is a list of sequences
+    mle_P = fit_predictor([traj[:15], traj[15:]], traj.max()+1, mode='MLE')
+    map_P = fit_predictor([traj[:15], traj[15:]], traj.max()+1, mode='MAP')
+    
     print('Code block execution took', time.time()-start, 'seconds.')
-    print('GT:')
-    print(gt)
-    print()
-    print('MAP:')
-    print(S_res)
-    print()
-    print('MLE:')
-    print(S_from_T)
-
-    # Next, repeat the code block above, trying to increase speed by using multiprocessing
-    start = time.time()
-    # calculate the MAP prediction term - relevant calculation have been moved to 'logspace'
-    # this allows us to rely on pure numpy for a longer section of the code
-    tmp_log = T_data * np.log(np.maximum(S, eps))
-    print('tmp_log shape:', tmp_log.shape)
-    tmp_log = tmp_log.sum(axis=(-1,-2))
-    print('tmp_log shape after sum:', tmp_log.shape)
-    # chunk the arrays of mpfs into several sections
-    # each section is handed to its own process
-    n_proc = 16 #cpu_count()-1 or 1
-    chunk = tmp_log.shape[0]//n_proc + 1
-    # parallelize the first operation - the element-wise exp
-    input_list = [tmp_log[chunk*k:chunk*(k+1)].astype(object) * mp.mpf('1') for k in range(n_proc)]
-    pool_1 = Pool() #processes=n_proc
-    pool_res = pool_1.map(exp, input_list)
-    pool_1.close()
-    # stich the results from each process together
-    tmp_exp = np.concatenate(pool_res, axis = 0)
-    print('tmp_exp shape:', tmp_exp.shape)
-    # parallelize the second operation - weighted matrix sum
-    input_list = [(S[chunk*k:chunk*(k+1)], tmp_exp[chunk*k:chunk*(k+1)].astype(object) * mp.mpf('1')) for k in range(n_proc)]
-    pool_2 = Pool()
-    pool_res = pool_2.map(mul_sum, input_list)
-    pool_2.close()
-    S_expectation = np.array(pool_res).sum(axis=0)
-    print('S_expectation shape:', S_expectation.shape)
-    eta = tmp_exp.sum()
-    print('eta:', eta)
-    # normalize the result, here we divide an array of tiny values by a very small normalization factor eta
-    # now our values are large enough again to be represented appropriately by float64
-    S_res = (1/eta * S_expectation).astype(np.float64)
-    print('Result dtype:', S_res.dtype)
-    # load the result of the previous code block for comparison
-    S_prev = np.load('prev.npy')
-    print(S_res.shape)
-    # compare the result of this code block to the result of the previous one
-    print('Result changed?', not np.allclose(S_res, S_prev))
-    # Print runtime, ground truth transition matrix for the simulator, MAP estimate, and MLE estimate
-    print('Cell execution took', time.time()-start, 'seconds.')
-    print('GT:')
-    print(gt)
-    print()
-    print('MAP:')
-    print(S_res)
-    print()
-    print('MLE:')
-    print(S_from_T)
-    # When we have a small number of samples relative to the dimensionality of the state space, the MAP estimate should be safer!
-    # Note that improvements in performance are much more noticeable when the state space is larger
+    print('Ground Truth:\n', gt, '\n')
+    print('MLE:\n', mle_P, '\n')
+    print('MAP:\n', map_P, '\n')
     
