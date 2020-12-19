@@ -129,6 +129,10 @@ def state_dist_to_activity_dist(state_dist, labels, state_batch):
     
     helper_states = lookup_states(np.arange(0, state_dist.shape[0]), labels, state_batch)
     return state_dist.T @ helper_states
+
+def state_dist_to_most_likely_state(state_dist, labels, state_batch):
+    max_inds = np.argmax(state_dist, axis=0)
+    return lookup_states(max_inds, labels, state_batch)
     
 
 def BCE(prediction_dist, target):
@@ -217,7 +221,65 @@ def PCA(data, correlation = False, sort = True):
 
     return eigenvalues, eigenvectors
     
-    
+# document these!
+def predict(list_of_seqs, P, N_steps, num_unique_states):
+    in_flat = np.concatenate([item[:-N_steps] for item in list_of_seqs])
+    one_hot_prediction_input = one_hot_encode(in_flat, num_states = num_unique_states)
+    pred = np.power(P, N_steps)
+    # calculate a distribution over future states
+    return pred @ one_hot_prediction_input
+
+def list_to_prediction_targets(list_of_seqs, N_steps, labels, state_set):
+    targets = np.concatenate([item[N_steps:] for item in list_of_seqs])
+    return lookup_states(targets, labels, state_set)
+
+def prediction_output_transform(pred_out, labels, state_set, mode):
+    if mode == 'activity_dist':
+        return state_dist_to_activity_dist(pred_out, labels, state_set)
+    elif mode == 'argmax':
+        return state_dist_to_most_likely_state(pred_out, labels, state_set)
+    elif mode == 'nearest_neighbor':
+        distribution = state_dist_to_activity_dist(pred_out, labels, state_set)
+        return distribution >= 0.5
+    else:
+        raise NotImplementedError("Unknown prediction output transform!")
+        
+def bit_flips(prediction_dist, target):
+    dist_rounded = prediction_dist >= 0.5
+    loss = dist_rounded.astype(int) == target.astype(int)
+    return 1 - loss.mean(axis=-1)
+
+def target_space_transform(targets, mode='Id', direction='Forward'):
+    if mode == 'Id':
+        if direction == 'Forward':
+            return targets
+        elif direction == 'Backward':
+            return targets
+        else:
+            raise NotImplementedError("Unknown direction!")
+    elif mode == 'Sqrt':
+        if direction == 'Forward':
+            return np.sqrt(np.abs(targets))
+        elif direction == 'Backward':
+            return -np.power(targets, 2)
+        else:
+            raise NotImplementedError("Unknown direction!")   
+    else:
+        raise NotImplementedError("Unknown target space transform!")
+        
+# maybe check what is X, and what is X.T here...
+def build_state_mat(states):
+    return np.concatenate([np.ones((states.shape[0],1)), states], axis=-1).T
+
+def fit_regressor(states, targets, mode='MLE', eps=1e-25):
+    X = build_state_mat(states)
+    if mode == 'MLE':
+        return np.linalg.inv(X @ X.T + eps*np.eye(X.shape[0])) @ X @ targets
+    elif mode == 'MAP':
+        var = targets.var()
+        return np.linalg.inv(X @ X.T + var*np.eye(X.shape[0])) @ X @ targets
+    else:
+        raise NotImplementedError("Unknown regressor mode!")
     
 if __name__ == '__main__':
     dataset_df = get_table()
