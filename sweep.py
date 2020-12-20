@@ -300,6 +300,19 @@ if config.eval_predictor:
 
     wandb.log({"Predictor BCE overview": wandb.Image(fig)})
 
+    train_avg_bce = mega_frame[mega_frame['Set'] == 'Training']['BCE'].dropna().values.mean()
+    valid_avg_bce = mega_frame[mega_frame['Set'] == 'Validation']['BCE'].dropna().values.mean()
+
+    train_avg_flips = mega_frame[mega_frame['Set'] == 'Training']['Flips'].dropna().values.mean()
+    valid_avg_flips = mega_frame[mega_frame['Set'] == 'Validation']['Flips'].dropna().values.mean()
+    print('Average training BCE:', train_avg_bce)
+    print('Average validation BCE:', valid_avg_bce)
+    print('Average training Bit Flips:', train_avg_flips)
+    print('Average validation Bit Flips:', valid_avg_flips)
+
+    wandb.log({'Training BCE': train_avg_bce, 'Validation BCE': valid_avg_bce, 'Training Bit Flips': train_avg_flips, 'Validation Bit Flips': valid_avg_flips})
+
+if config.eval_regressor:
     mega_frame_regression = pd.concat(regression_frames)
 
     fig, ax = plt.subplots(figsize=(40,10))
@@ -315,21 +328,7 @@ if config.eval_predictor:
     plt.close()
 
     wandb.log({"Regressor Overview": wandb.Image(fig)})
-
-
-    train_avg_bce = mega_frame[mega_frame['Set'] == 'Training']['BCE'].dropna().values.mean()
-    valid_avg_bce = mega_frame[mega_frame['Set'] == 'Validation']['BCE'].dropna().values.mean()
-
-    train_avg_flips = mega_frame[mega_frame['Set'] == 'Training']['Flips'].dropna().values.mean()
-    valid_avg_flips = mega_frame[mega_frame['Set'] == 'Validation']['Flips'].dropna().values.mean()
-    print('Average training BCE:', train_avg_bce)
-    print('Average validation BCE:', valid_avg_bce)
-    print('Average training Bit Flips:', train_avg_flips)
-    print('Average validation Bit Flips:', valid_avg_flips)
-
-    wandb.log({'Training BCE': train_avg_bce, 'Validation BCE': valid_avg_bce, 'Training Bit Flips': train_avg_flips, 'Validation Bit Flips': valid_avg_flips})
-
-if config.eval_regressor:
+    
     train_charge_mask = (mega_frame_regression['Set'] == 'Training') & (mega_frame_regression['Battery'] == 'Charging')
     L1_training_charging = mega_frame_regression[train_charge_mask]['L1'].dropna().values.mean()
     valid_charge_mask = (mega_frame_regression['Set'] == 'Validation') & (mega_frame_regression['Battery'] == 'Charging')
