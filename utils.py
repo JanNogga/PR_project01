@@ -173,7 +173,7 @@ def estim_map(transition_counts, num_samples=500, limit=100, d_type=np.float32, 
     tmp = tmp.sum(axis=(-1,-2))
     tmp -= tmp.max()
     tmp = np.exp(tmp)
-    samples =  samples * tmp[:, None, None] 
+    samples =  samples * tmp[:, None, None]
     S_res = samples.sum(axis=0)
     eta = tmp.sum()
     return (1/eta * S_res).astype(np.float64)
@@ -197,29 +197,6 @@ def fit_predictor(list_of_seqs, num_unique_states, mode, num_samples=500, limit=
         return estim_map(N, num_samples=num_samples, limit=limit, d_type=d_type, eps=eps)
     else:
         raise NotImplementedError("Unknown predictor mode!")
-
-def PCA(data, correlation = False, sort = True):
-
-    mean = np.mean(data, axis=0)
-
-    data_adjust = data - mean
-    
-    if correlation:
-
-        matrix = np.corrcoef(data_adjust.T)
-
-    else:
-        matrix = np.cov(data_adjust.T) 
-
-    eigenvalues, eigenvectors = np.linalg.eig(matrix)
-
-    if sort:
-    #: sort eigenvalues and eigenvectors
-        sort = eigenvalues.argsort()[::-1]
-        eigenvalues = eigenvalues[sort]
-        eigenvectors = eigenvectors[:,sort]
-
-    return eigenvalues, eigenvectors
     
 # document these!
 def predict(list_of_seqs, P, N_steps, num_unique_states):
@@ -280,6 +257,117 @@ def fit_regressor(states, targets, mode='MLE', eps=1e-25):
         return np.linalg.inv(X @ X.T + var*np.eye(X.shape[0])) @ X @ targets
     else:
         raise NotImplementedError("Unknown regressor mode!")
+        
+def get_non_nan(examples):
+    """
+    Returns the position of the input, where the measurements weren't nan.
+    
+    Assumes the examples to be a np array.
+    """
+    return ~np.isnan(examples)
+    
+    
+def _entropy(points, n):
+    """
+    Entropy for n classes, enumerated, i.e. labels of classes = np.arange(n)
+    
+    It may be needed to change the clip to something smaler.
+    Points is assumed to be a vector (for example the Targets).
+    """
+    p = np.asarray([np.sum([points==i])/np.prod(points.shape) for i in np.arange(n)])
+    q = np.clip(p[p>0], 1e-15, 1)
+    return -np.sum( q * np.log2(q))
+
+
+"""
+Information gain ratio is the ratio between information gain and
+the entropy of the feature's value distribution. 
+The score was introduced in [Quinlan1986]_
+to alleviate overestimation for multi-valued features. 
+See `Wikipedia entry on gain ratio
+<http://en.wikipedia.org/wiki/Information_gain_ratio>`_.
+.. [Quinlan1986] J R Quinlan: Induction of Decision Trees, Machine Learning, 1986.
+"""
+
+def GainRatio(examples,n):
+    """
+    Returns the Information Gain-Ration, that is \frac{Information Gain}{Intrinsic Value}
+
+    examples are all training examples, given as 2-d numpy array.
+    Assuming H is the Entropy and EX are the examples[0], than H(EX)shall be the same as h_class.
+    nan_adjustment is neccesary in a preprocessing step.
+    The Information Gain is h_class-h_residual.
+    h_attribute is the Intrinsic Value.
+    If h_attribute = 0, than the Information Gain-Ration is the same as the Information Gain.
+    """
+    h_class = _entropy(examples[0],n)
+    
+    #p_val = probability to get val if drawn uniformly 
+    p_val=np.asarray([np.unique(examples[j+1],return_counts=True)[1]/examples.shape[1] for j in np.arange(examples.shape[0]-1)])
+    p_val[p_val==0]=1
+    h_residual = np.asarray([p_val[j]@[_entropy(examples[0][examples[j+1] == val],n)for val in np.unique(examples[j+1])]for j in np.arange(examples.shape[0]-1)])
+    h_attribute = np.asarray([- p_val[j] @ np.log2(p_val[j])for j in np.arange(examples.shape[0]-1)])
+    return (h_class - h_residual) / h_attribute
+
+def _gini(targets):
+    """Gini index of class-distribution matrix"""
+    p = np.sum(targets==1)/np.prod(targets.shape)
+    return 1-(p**2+(1-p)**2)
+
+
+"""
+Gini index is the probability of incorrectly labeling a randomly chosen element if the element was chosen
+randomly according to the class distributions. The Gini gain maximises the expected reduction in the Gini index.
+For reference see `Computational Statistics & Data Analysis on Gini Gain
+<https://www.sciencedirect.com/science/article/abs/pii/S0167947306005093>`_.
+"""
+
+def GiniGain(examples):
+    """
+    Returns the Gini split of the examples, choose the smalest one to get maximum Gini gain.
+    
+    Targets have to be binary!
+    examples are all training examples, given as 2-d numpy array.
+    The orientation of the numpy array is assumed ro be the same as for GainRatio.
+    nan_adjustment is neccesary in a preprocessing step.
+    """
+    p_val = np.asarray([np.unique(examples[j+1],return_counts=True)[1]/examples.shape[1] for j in np.arange(examples.shape[0]-1)])
+    gini_split = np.asarray([p_val[j]@np.asarray([_gini(examples[0][examples[j+1]==val])for val in np.unique(examples[j+1])])for j in np.arange(examples.shape[0]-1)])
+    return gini_split
+
+def state_space_transform(activity_vectors,targets=None, number_classes=2, mode='Id'):
+    """
+    Transforms/prunes the state space of the input.
+    
+    Possible states are 'Id', 'Clown', 'Gain','Gini'.
+    !Gain is not consistent with Gini! should be changed, but am to tired now...
+    Gain sorts by Information Gain Ratio. As of now, starting with the worst.
+    Gini sorts by Gini Gain. Starting with the best feature, ending with the worst.
+    """
+    if mode == 'Id':
+        out = activity_vectors[:,:-1]
+    elif mode == 'Clown':
+        out = np.ones_like(activity_vectors[:,:-1])
+    elif mode == 'Gain':
+        n= number_classes
+        activity_vectors_new = np.concatenate((targets, activity_vectors[:,:-1].T), axis=0)
+        gain_ratio = GainRatio(activity_vectors_new,n)
+        activity_vectors_new = activity_vectors[:,:-1]
+        args_sorted = gain_ratio.argsort()
+        out = activity_vectors_new[:,args_sorted]
+    elif mode == 'Gini':
+        activity_vectors_new = np.concatenate((targets, activity_vectors[:,:-1].T), axis=0)
+        gini_gain = GiniGain(activity_vectors_new)
+        activity_vectors_new = activity_vectors[:,:-1]
+        args_sorted = gini_gain.argsort()
+        out = activity_vectors_new[:,args_sorted]
+    else:
+        raise NotImplementedError("Unknown state space transform!")
+    return np.concatenate([out, activity_vectors[:,-1, None]], axis=1)
+
+def L1(out, target):
+    return np.abs(out - target)
+
     
 if __name__ == '__main__':
     dataset_df = get_table()
