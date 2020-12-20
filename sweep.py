@@ -12,6 +12,7 @@ hyperparameter_defaults = dict(
     state_transform_mode = 'Id', #'Gain', 'Gini'
     keep_best = 16, #1-34
     predictor_mode = 'MLE', #'MAP'
+    prediction_transform = 'argmax', #'activity_dist', 'argmax', 'nearest_neighbor'
     regressor_mode = 'MLE', #'MAP'
     charge_transform_mode = 'Id',
     discharge_transform_mode = 'Id', #'Sqrt'
@@ -131,7 +132,7 @@ for ind in ind_set:
     N_steps = 1
     estimate = predict(valid_set_prediction, P, N_steps, num_unique_states)
     # convert to sets of individual distributions over activity components
-    prediction = prediction_output_transform(estimate, dataset_df['out_labels'].values, states, 'activity_dist')
+    prediction = prediction_output_transform(estimate, dataset_df['out_labels'].values, states, mode=config.prediction_transform)
     # simple targets - just time-shifted the input by N_steps
     pred_targets = list_to_prediction_targets(valid_set_prediction, N_steps, dataset_df['out_labels'].values, states)
     # calculate loss
@@ -146,7 +147,7 @@ for ind in ind_set:
     
     estimate_train = predict(train_set_prediction, P, N_steps, num_unique_states)
     # convert to sets of individual distributions over activity components
-    prediction_train = prediction_output_transform(estimate_train, dataset_df['out_labels'].values, states, 'activity_dist')
+    prediction_train = prediction_output_transform(estimate_train, dataset_df['out_labels'].values, states, mode=config.prediction_transform)
     # simple targets - just time-shifted the input by N_steps
     pred_targets_train = list_to_prediction_targets(train_set_prediction, N_steps, dataset_df['out_labels'].values, states)
     # calculate loss
