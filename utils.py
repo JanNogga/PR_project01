@@ -206,6 +206,13 @@ def predict(list_of_seqs, P, N_steps, num_unique_states):
     # calculate a distribution over future states
     return pred @ one_hot_prediction_input
 
+def predict_2(list_of_seqs, P, N_steps, num_unique_states):
+    in_flat = np.concatenate([np.atleast_1d(item) for item in list_of_seqs])
+    one_hot_prediction_input = one_hot_encode(in_flat, num_states = num_unique_states)
+    pred = np.power(P, N_steps)
+    # calculate a distribution over future states
+    return pred @ one_hot_prediction_input
+
 def list_to_prediction_targets(list_of_seqs, N_steps, labels, state_set):
     targets = np.concatenate([item[N_steps:] for item in list_of_seqs])
     return lookup_states(targets, labels, state_set)
