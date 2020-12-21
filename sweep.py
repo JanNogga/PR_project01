@@ -132,7 +132,7 @@ for ind in ind_set:
     N_steps = 1
     estimate = predict(valid_set_prediction, P, N_steps, num_unique_states)
     # convert to sets of individual distributions over activity components
-    prediction = prediction_output_transform(estimate, dataset_df['out_labels'].values, states, mode=config.prediction_transform)
+    prediction = prediction_output_transform(estimate, dataset_df['out_labels'].values, states, mode=prediction_transform)
     # simple targets - just time-shifted the input by N_steps
     pred_targets = list_to_prediction_targets(valid_set_prediction, N_steps, dataset_df['out_labels'].values, states)
     # calculate loss
