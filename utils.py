@@ -2,6 +2,7 @@ import os
 import pandas as pd
 import numpy as np
 from IPython.display import display
+import time
 
 
 def get_table(filepath = None):
@@ -101,12 +102,17 @@ def count_transitions(sequence, num_states=None):
     return np.bincount(flattened_index, minlength=shape**2).reshape(dims).astype(float).T
 
 def normalize_transition_matrix(transition_matrix):
-    """Normalizes a given transition matrix such that each column sums up to one.
+    """Normalizes a given transition matrix or batch thereof such that each column sums up to one.
     
-    The given transition matrix is assumed to be stored in a numpy array.
+    The given transition matrix is assumed to be stored in a numpy array. 
     """
     
-    return transition_matrix / np.maximum(transition_matrix.sum(0, keepdims=True), 1)
+    input_dims = len(transition_matrix.shape)
+    assert input_dims == 2 or input_dims == 3, 'Transition matrix must be a least 2D, and appropriately batched!'
+    if input_dims == 2:
+        return transition_matrix / np.maximum(transition_matrix.sum(0, keepdims=True), 1)
+    else:
+        return transition_matrix / np.maximum(transition_matrix.sum(1, keepdims=True), 1)
 
 
 def state_dist_to_activity_dist(state_dist, labels, state_batch):
@@ -123,6 +129,10 @@ def state_dist_to_activity_dist(state_dist, labels, state_batch):
     
     helper_states = lookup_states(np.arange(0, state_dist.shape[0]), labels, state_batch)
     return state_dist.T @ helper_states
+
+def state_dist_to_most_likely_state(state_dist, labels, state_batch):
+    max_inds = np.argmax(state_dist, axis=0)
+    return lookup_states(max_inds, labels, state_batch)
     
 
 def BCE(prediction_dist, target):
@@ -135,8 +145,236 @@ def BCE(prediction_dist, target):
     
     loss = target*np.log(np.maximum(prediction_dist, 1e-15)) + (1-target)*np.log(np.maximum(1-prediction_dist, 1e-15))
     return -loss.mean(axis=-1)
+
+def estim_mle(transition_counts):
+    """Returns the MLE estimator transition matrix for a Markov chain. 
+
+    The input is assumed to be a numpy array (n_i,j) counting transitions from state j to state i, shaped
+    (num_unique_states, num_unique_states). The output has the same shape, and contains the estimated
+    prediction probabilities from state j to state i.
+    """
+    
+    return normalize_transition_matrix(transition_counts)
+
+def estim_map(transition_counts, num_samples=500, limit=100, d_type=np.float32, eps=1e-25):
+    """Returns the MAP estimator transition matrix for a Markov chain. 
+
+    The input is assumed to be a numpy array (n_i,j) counting transitions from state j to state i, shaped
+    (num_unique_states, num_unique_states). The output has the same shape, and contains the estimated
+    prediction probabilities from state j to state i. You can also set the number of samples for the approximation
+    of the result, as well as the upper limit for the sampled matrix values. Operations are safely possible in
+    float32 representation. The amount of memory allocated in RAM by this function is about 5GB per 1k samples.
+    """
+    
+    num_states = transition_counts.shape[-1]
+    samples = np.random.randint(limit, size=(num_samples, num_states, num_states), dtype=np.int16).astype(d_type)
+    samples = normalize_transition_matrix(samples)
+    tmp = transition_counts.astype(d_type) * np.log(np.maximum(samples, eps))
+    tmp = tmp.sum(axis=(-1,-2))
+    tmp -= tmp.max()
+    tmp = np.exp(tmp)
+    samples =  samples * tmp[:, None, None]
+    S_res = samples.sum(axis=0)
+    eta = tmp.sum()
+    return (1/eta * S_res).astype(np.float64)
+
+def fit_predictor(list_of_seqs, num_unique_states, mode, num_samples=500, limit=100, d_type=np.float32, eps=1e-25):
+    """Returns MLE or MAP predictors fitted to a given list of sequences describing state transitions.
+    
+    Please provide the number of unique states yourself, and pass even a single sequence as a one-element list. The 
+    observed state transition counts are aggregated over all sequences, and then used to get the best fit transition
+    matrix. Also note the arguments which might be passed down to different prediction modes, but are irrelevant to
+    others.
+    """
+    
+    N = np.zeros((num_unique_states, num_unique_states))
+    for seq in list_of_seqs:
+        N += count_transitions(seq, num_states=num_unique_states)
+        
+    if mode == 'MLE':
+        return estim_mle(N)
+    elif mode == 'MAP':
+        return estim_map(N, num_samples=num_samples, limit=limit, d_type=d_type, eps=eps)
+    else:
+        raise NotImplementedError("Unknown predictor mode!")
+    
+# document these!
+def predict(list_of_seqs, P, N_steps, num_unique_states):
+    in_flat = np.concatenate([item[:-N_steps] for item in list_of_seqs])
+    one_hot_prediction_input = one_hot_encode(in_flat, num_states = num_unique_states)
+    pred = np.power(P, N_steps)
+    # calculate a distribution over future states
+    return pred @ one_hot_prediction_input
+
+def predict_2(list_of_seqs, P, N_steps, num_unique_states):
+    in_flat = np.concatenate([np.atleast_1d(item) for item in list_of_seqs])
+    one_hot_prediction_input = one_hot_encode(in_flat, num_states = num_unique_states)
+    pred = np.power(P, N_steps)
+    # calculate a distribution over future states
+    return pred @ one_hot_prediction_input
+
+def list_to_prediction_targets(list_of_seqs, N_steps, labels, state_set):
+    targets = np.concatenate([item[N_steps:] for item in list_of_seqs])
+    return lookup_states(targets, labels, state_set)
+
+def prediction_output_transform(pred_out, labels, state_set, mode):
+    if mode == 'activity_dist':
+        return state_dist_to_activity_dist(pred_out, labels, state_set)
+    elif mode == 'argmax':
+        return state_dist_to_most_likely_state(pred_out, labels, state_set)
+    elif mode == 'nearest_neighbor':
+        distribution = state_dist_to_activity_dist(pred_out, labels, state_set)
+        return distribution >= 0.5
+    else:
+        raise NotImplementedError("Unknown prediction output transform!")
+        
+def bit_flips(prediction_dist, target):
+    dist_rounded = prediction_dist >= 0.5
+    loss = dist_rounded.astype(int) == target.astype(int)
+    return 1 - loss.mean(axis=-1)
+
+def target_space_transform(targets, mode='Id', direction='Forward'):
+    if mode == 'Id':
+        if direction == 'Forward':
+            return targets
+        elif direction == 'Backward':
+            return targets
+        else:
+            raise NotImplementedError("Unknown direction!")
+    elif mode == 'Sqrt':
+        if direction == 'Forward':
+            return np.sqrt(np.abs(targets))
+        elif direction == 'Backward':
+            return -np.power(targets, 2)
+        else:
+            raise NotImplementedError("Unknown direction!")   
+    else:
+        raise NotImplementedError("Unknown target space transform!")
+        
+# maybe check what is X, and what is X.T here...
+def build_state_mat(states):
+    return np.concatenate([np.ones((states.shape[0],1)), states], axis=-1).T
+
+def fit_regressor(states, targets, mode='MLE', eps=1e-25):
+    X = build_state_mat(states)
+    if mode == 'MLE':
+        return np.linalg.inv(X @ X.T + eps*np.eye(X.shape[0])) @ X @ targets
+    elif mode == 'MAP':
+        var = targets.var()
+        return np.linalg.inv(X @ X.T + var*np.eye(X.shape[0])) @ X @ targets
+    else:
+        raise NotImplementedError("Unknown regressor mode!")
+        
+def get_non_nan(examples):
+    """
+    Returns the position of the input, where the measurements weren't nan.
+    
+    Assumes the examples to be a np array.
+    """
+    return ~np.isnan(examples)
     
     
+def _entropy(points, n):
+    """
+    Entropy for n classes, enumerated, i.e. labels of classes = np.arange(n)
+    
+    It may be needed to change the clip to something smaler.
+    Points is assumed to be a vector (for example the Targets).
+    """
+    p = np.asarray([np.sum([points==i])/np.prod(points.shape) for i in np.arange(n)])
+    q = np.clip(p[p>0], 1e-15, 1)
+    return -np.sum( q * np.log2(q))
+
+
+"""
+Information gain ratio is the ratio between information gain and
+the entropy of the feature's value distribution. 
+The score was introduced in [Quinlan1986]_
+to alleviate overestimation for multi-valued features. 
+See `Wikipedia entry on gain ratio
+<http://en.wikipedia.org/wiki/Information_gain_ratio>`_.
+.. [Quinlan1986] J R Quinlan: Induction of Decision Trees, Machine Learning, 1986.
+"""
+
+def GainRatio(examples,n):
+    """
+    Returns the Information Gain-Ration, that is \frac{Information Gain}{Intrinsic Value}
+
+    examples are all training examples, given as 2-d numpy array.
+    Assuming H is the Entropy and EX are the examples[0], than H(EX)shall be the same as h_class.
+    nan_adjustment is neccesary in a preprocessing step.
+    The Information Gain is h_class-h_residual.
+    h_attribute is the Intrinsic Value.
+    If h_attribute = 0, than the Information Gain-Ration is the same as the Information Gain.
+    """
+    h_class = _entropy(examples[0],n)
+    
+    #p_val = probability to get val if drawn uniformly 
+    p_val=np.asarray([np.unique(examples[j+1],return_counts=True)[1]/examples.shape[1] for j in np.arange(examples.shape[0]-1)])
+    p_val[p_val==0]=1
+    h_residual = np.asarray([p_val[j]@[_entropy(examples[0][examples[j+1] == val],n)for val in np.unique(examples[j+1])]for j in np.arange(examples.shape[0]-1)])
+    h_attribute = np.asarray([- p_val[j] @ np.log2(p_val[j])for j in np.arange(examples.shape[0]-1)])
+    return (h_class - h_residual) / h_attribute
+
+def _gini(targets):
+    """Gini index of class-distribution matrix"""
+    p = np.sum(targets==1)/np.prod(targets.shape)
+    return 1-(p**2+(1-p)**2)
+
+
+"""
+Gini index is the probability of incorrectly labeling a randomly chosen element if the element was chosen
+randomly according to the class distributions. The Gini gain maximises the expected reduction in the Gini index.
+For reference see `Computational Statistics & Data Analysis on Gini Gain
+<https://www.sciencedirect.com/science/article/abs/pii/S0167947306005093>`_.
+"""
+
+def GiniGain(examples):
+    """
+    Returns the Gini split of the examples, choose the smalest one to get maximum Gini gain.
+    
+    Targets have to be binary!
+    examples are all training examples, given as 2-d numpy array.
+    The orientation of the numpy array is assumed ro be the same as for GainRatio.
+    nan_adjustment is neccesary in a preprocessing step.
+    """
+    p_val = np.asarray([np.unique(examples[j+1],return_counts=True)[1]/examples.shape[1] for j in np.arange(examples.shape[0]-1)])
+    gini_split = np.asarray([p_val[j]@np.asarray([_gini(examples[0][examples[j+1]==val])for val in np.unique(examples[j+1])])for j in np.arange(examples.shape[0]-1)])
+    return gini_split
+
+def state_space_transform(activity_vectors,targets=None, number_classes=2, mode='Id'):
+    """
+    Transforms/prunes the state space of the input.
+    
+    Possible states are 'Id', 'Clown', 'Gain','Gini'.
+    !Gain is not consistent with Gini! should be changed, but am to tired now...
+    Gain sorts by Information Gain Ratio. As of now, starting with the worst.
+    Gini sorts by Gini Gain. Starting with the best feature, ending with the worst.
+    """
+    if mode == 'Id':
+        out = activity_vectors[:,:-1]
+    elif mode == 'Clown':
+        out = np.ones_like(activity_vectors[:,:-1])
+    elif mode == 'Gain':
+        n= number_classes
+        activity_vectors_new = np.concatenate((targets, activity_vectors[:,:-1].T), axis=0)
+        gain_ratio = GainRatio(activity_vectors_new,n)
+        activity_vectors_new = activity_vectors[:,:-1]
+        args_sorted = gain_ratio.argsort()
+        out = activity_vectors_new[:,args_sorted]
+    elif mode == 'Gini':
+        activity_vectors_new = np.concatenate((targets, activity_vectors[:,:-1].T), axis=0)
+        gini_gain = GiniGain(activity_vectors_new)
+        activity_vectors_new = activity_vectors[:,:-1]
+        args_sorted = gini_gain.argsort()
+        out = activity_vectors_new[:,args_sorted]
+    else:
+        raise NotImplementedError("Unknown state space transform!")
+    return np.concatenate([out, activity_vectors[:,-1, None]], axis=1)
+
+def L1(out, target):
+    return np.abs(out - target)
+
     
 if __name__ == '__main__':
     dataset_df = get_table()
@@ -214,7 +452,47 @@ if __name__ == '__main__':
     # print reduced loss
     print('Prediction loss over the whole dataset for', N_steps, 'time-steps:', loss.mean())
     
+    # a very basic attempt at regression - note that the state space seems 'redundant'
+    print('Number of running packages:', len(running_packages))
+    activity_vectors_df = dataset_df[running_packages[:49]+running_packages[50:54]+running_packages[55:]]
+    print('...after removing some:', len(running_packages[:49]+running_packages[50:54]+running_packages[55:]))
+    activity_vectors_df = activity_vectors_df[dataset_df['battery_level'] <= 0.]
+    activity_vectors_df = activity_vectors_df.T.drop_duplicates().T
+    activity_vectors = activity_vectors_df.dropna().to_numpy()
+    x = activity_vectors
+    print('Final data shape:', x.shape)
+    X = np.concatenate([np.ones((x.shape[0],1)), x], axis=-1).T
+    print('X shape:', X.shape)
+    print('X.T shape:', X.T.shape)
+    y = dataset_df['battery_level'].dropna().to_numpy()
+    y = y[y <= 0.]
+    print('Targets shape:', y.shape)
+    print('Hat matrix shape:', (X @ X.T).shape)
+    w = np.linalg.inv(X @ X.T) @ X @ y
+    print('Weights Shape:', w.shape)
     
+    # a minimal example of the MLE/MAP transition matrix estimation process
+    # the calculations for MAP are borrowed from the ipynb example uploaded by Sebastian to ecampus, and executed in 'logspace'
+    # fix random number generator so our results are the same
+    np.random.seed(123)
+    # first, we define some ground truth transition matrix for a dummy Markov Chain
+    gt = np.array([[1./3., 1./4., 1./5., 1./6.], [1./6., 1./4., 1./5, 1./3.], [1./3., 1./4., 2./5, 1./6.], [1./6., 1./4., 1./5., 1./3.]])
+    # start in some state, here it is 0
+    traj = [int(0)]
+    # get only a small number of sample transitions within this Markov Chain, add them to the 'trajectory'
+    nn = 29
+    #simulate the process
+    for i in range(nn):
+        traj.append(np.random.choice([0, 1, 2, 3], p=gt[:,traj[-1]]).astype(int))
+    traj = np.array(traj).astype(int)
+
+    start = time.time()
+    # here we have simply split the sequence traj into traj[:15], traj[15:] to emphasize that the input is a list of sequences
+    mle_P = fit_predictor([traj[:15], traj[15:]], traj.max()+1, mode='MLE')
+    map_P = fit_predictor([traj[:15], traj[15:]], traj.max()+1, mode='MAP')
     
-
-
+    print('Code block execution took', time.time()-start, 'seconds.')
+    print('Ground Truth:\n', gt, '\n')
+    print('MLE:\n', mle_P, '\n')
+    print('MAP:\n', map_P, '\n')
+    
